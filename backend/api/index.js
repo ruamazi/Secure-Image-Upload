@@ -265,5 +265,14 @@ app.get('/api/health', (req, res) => {
   })
 })
 
+// Root path handler
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Secure Image Share API',
+    status: 'running',
+    health: '/api/health'
+  })
+})
+
 // Export for Vercel serverless
 export default app
