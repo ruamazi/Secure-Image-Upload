@@ -5,6 +5,9 @@ import ViewPage from './pages/ViewPage'
 import EncryptionPage from './pages/EncryptionPage'
 import TelegramPage from './pages/TelegramPage'
 import StoragePage from './pages/StoragePage'
+import AuthPage from './pages/AuthPage'
+import PricingPage from './pages/PricingPage'
+import BillingPage from './pages/BillingPage'
 import Navbar from './components/Navbar'
 import './App.css'
 
@@ -36,6 +39,9 @@ function App() {
           <Route path="/encryption" element={<EncryptionPage />} />
           <Route path="/telegram" element={<TelegramPage />} />
           <Route path="/storage" element={<StoragePage />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/billing" element={<BillingPage />} />
         </Routes>
       </main>
     </div>

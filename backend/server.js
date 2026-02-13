@@ -3,6 +3,7 @@ dotenv.config()
 
 import express from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import mongoose from 'mongoose'
 import { v4 as uuidv4 } from 'uuid'
 import cloudinaryModule from 'cloudinary'
@@ -25,20 +26,38 @@ cloudinaryModule.v2.config({
 console.log('[SERVER] Cloudinary configured. Current config:', cloudinaryModule.v2.config().cloud_name)
 
 import Image from './models/Image.js'
+import User from './models/User.js'
 import { upload } from './config/cloudinary.js'
 import { sendDecryptionKey } from './services/telegram.js'
+import { authMiddleware, optionalAuth } from './middleware/auth.js'
+import authRoutes from './routes/auth.js'
+import paymentRoutes from './routes/payment.js'
+import webhookRoutes from './routes/webhooks.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
 
-app.use(cors())
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}))
 app.use(express.json())
+app.use(cookieParser())
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/secure-img-share')
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err))
 
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+// Auth routes
+app.use('/api/auth', authRoutes)
+
+// Payment routes
+app.use('/api/payment', paymentRoutes)
+
+// Webhook routes (needs raw body for PayPal signature verification)
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoutes)
+
+app.post('/api/upload', optionalAuth, upload.single('image'), async (req, res) => {
   console.log('[UPLOAD] Multer middleware completed')
   
   try {
@@ -50,6 +69,19 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
     if (!telegramId) {
       return res.status(400).json({ error: 'Telegram ID is required' })
+    }
+
+    // Check user upload limits if authenticated
+    let user = req.user
+    if (user) {
+      const canUpload = user.canUpload()
+      if (!canUpload) {
+        return res.status(403).json({ 
+          error: 'Upload limit reached',
+          message: 'You have reached your monthly upload limit. Upgrade to premium for unlimited uploads.',
+          upgradeRequired: true
+        })
+      }
     }
 
     console.log('[UPLOAD] Uploading to Cloudinary...')
@@ -81,6 +113,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
     
     const image = new Image({
       imageId,
+      userId: user ? user._id : null,
       cloudinaryUrl: cloudinaryResult.secure_url,
       cloudinaryPublicId: cloudinaryResult.public_id,
       originalName: originalName || 'image',
@@ -91,6 +124,12 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
     await image.save()
     console.log('[UPLOAD] Saved to MongoDB')
+
+    // Increment user upload count if authenticated
+    if (user) {
+      await user.incrementUpload()
+      console.log('[UPLOAD] User upload count incremented')
+    }
     
     res.json({
       success: true,

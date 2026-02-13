@@ -7,6 +7,11 @@ const imageSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
   cloudinaryUrl: {
     type: String,
     required: true

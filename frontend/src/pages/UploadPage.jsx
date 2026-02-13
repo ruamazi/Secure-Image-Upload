@@ -1,18 +1,21 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Upload, Lock, Send, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Upload, Lock, Send, CheckCircle, AlertCircle, Loader2, User, Crown, Zap } from 'lucide-react'
 import { generateKey, exportKey, encryptFile } from '../utils/encryption'
+import { useAuth } from '../contexts/AuthContext'
 import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 export default function UploadPage() {
+  const { user, refreshUser, isAuthenticated } = useAuth()
   const [file, setFile] = useState(null)
   const [telegramId, setTelegramId] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [progress, setProgress] = useState(0)
   const fileInputRef = useRef(null)
+  const [showUpgradePrompt, setShowUpgradePrompt] = useState(false)
 
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0]
@@ -24,6 +27,13 @@ export default function UploadPage() {
     }
   }
 
+  // Refresh user data when component mounts
+  useEffect(() => {
+    if (isAuthenticated) {
+      refreshUser()
+    }
+  }, [isAuthenticated])
+
   const handleUpload = async () => {
     if (!file || !telegramId) {
       setUploadStatus({ type: 'error', message: 'Please select an image and enter your Telegram ID' })
@@ -31,6 +41,7 @@ export default function UploadPage() {
     }
 
     setUploading(true)
+    setShowUpgradePrompt(false)
     setProgress(10)
 
     try {
@@ -53,7 +64,8 @@ export default function UploadPage() {
 
       setProgress(80)
       const response = await axios.post(`${API_URL}/api/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        withCredentials: true
       })
 
       setProgress(90)
@@ -73,12 +85,40 @@ export default function UploadPage() {
       })
       setFile(null)
       setTelegramId('')
+      
+      // Refresh user data to update upload count
+      if (isAuthenticated) {
+        await refreshUser()
+      }
     } catch (error) {
       console.error('Upload error:', error)
-      setUploadStatus({ type: 'error', message: error.response?.data?.error || 'Upload failed. Please try again.' })
+      const errorData = error.response?.data
+      
+      if (errorData?.upgradeRequired) {
+        setShowUpgradePrompt(true)
+        setUploadStatus({ 
+          type: 'error', 
+          message: errorData.message || 'Upload limit reached'
+        })
+      } else {
+        setUploadStatus({ 
+          type: 'error', 
+          message: errorData?.error || 'Upload failed. Please try again.' 
+        })
+      }
     } finally {
       setUploading(false)
     }
+  }
+
+  const getRemainingUploads = () => {
+    if (!isAuthenticated) return null // Guest uploads unlimited
+    return user?.remainingUploads ?? 0
+  }
+
+  const hasReachedLimit = () => {
+    if (!isAuthenticated) return false
+    return user?.remainingUploads === 0
   }
 
   return (
@@ -92,6 +132,76 @@ export default function UploadPage() {
           Even we can't see your content.
         </p>
       </div>
+
+      {/* User Status Banner */}
+      {isAuthenticated && user && (
+        <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
+                <User className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900 dark:text-white">{user.name}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 capitalize">{user.subscription?.type} Plan</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {getRemainingUploads()}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">uploads left</p>
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="mt-3">
+            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                style={{ 
+                  width: `${Math.min(100, ((user.uploadStats?.currentMonth || 0) / (getRemainingUploads() + (user.uploadStats?.currentMonth || 0) || 1)) * 100)}%` 
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Guest Banner */}
+      {!isAuthenticated && (
+        <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl">
+          <div className="flex items-center gap-3">
+            <Zap className="w-5 h-5 text-yellow-600" />
+            <p className="text-sm text-yellow-800 dark:text-yellow-200">
+              <strong>Guest Mode:</strong> Sign up for free to track your uploads and get 5 uploads per month!
+              <Link to="/auth" className="ml-2 underline">Sign up →</Link>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade Prompt */}
+      {(showUpgradePrompt || hasReachedLimit()) && (
+        <div className="mb-6 p-6 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl text-white">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+              <Crown className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-lg mb-1">Upload Limit Reached!</h3>
+              <p className="text-white/90 text-sm mb-3">
+                You've used all your uploads for this month. Upgrade to Premium for 100 uploads per month.
+              </p>
+              <Link 
+                to="/pricing" 
+                className="inline-block bg-white text-purple-600 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-white/90 transition-colors"
+              >
+                Upgrade to Premium
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 transition-colors duration-300">
         <div 
@@ -170,9 +280,9 @@ export default function UploadPage() {
 
           <button
             onClick={handleUpload}
-            disabled={!file || !telegramId || uploading}
+            disabled={!file || !telegramId || uploading || hasReachedLimit()}
             className={`w-full py-4 rounded-lg font-semibold text-lg flex items-center justify-center gap-2 transition-all duration-300 ${
-              !file || !telegramId || uploading
+              !file || !telegramId || uploading || hasReachedLimit()
                 ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
             }`}
@@ -181,6 +291,11 @@ export default function UploadPage() {
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
                 Processing...
+              </>
+            ) : hasReachedLimit() ? (
+              <>
+                <Crown className="w-5 h-5" />
+                Upgrade Required
               </>
             ) : (
               <>
